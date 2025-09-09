@@ -1,102 +1,66 @@
+import os
 import ccxt
 import pandas as pd
-import time
+from dotenv import load_dotenv
 
-# ==============================
-#  MEXC Public Client (no keys needed)
-# ==============================
+# Load environment variables (Railway injects them automatically, but dotenv helps for local testing too)
+load_dotenv()
+
+# Get API keys from env
+api_key = os.getenv("MEXC_API_KEY")
+secret_key = os.getenv("MEXC_SECRET_KEY")
+
+# Initialize MEXC client
 exchange = ccxt.mexc({
-    "enableRateLimit": True
+    "apiKey": api_key,
+    "secret": secret_key
 })
 
-# Pairs we monitor
-pairs = ["BTC/USDT", "ETH/USDT", "ENA/USDT", "SOL/USDT", "XRP/USDT"]
-
-# ==============================
-#  Strategy Functions
-# ==============================
-
-def fetch_ohlcv(symbol, timeframe="5m", limit=100):
-    """Fetch OHLCV data from MEXC and return DataFrame"""
-    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-    df = pd.DataFrame(ohlcv, columns=["timestamp","open","high","low","close","volume"])  # type: ignore
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    return df
-
-def detect_liquidity_sweep(df):
-    """Check if last candle sweeps previous high/low"""
-    if len(df) < 3:
+def fetch_data(symbol="ETH/USDT", timeframe="1h", limit=100):
+    try:
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        df = pd.DataFrame(ohlcv, columns=["timestamp","open","high","low","close","volume"])  # type: ignore
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        return df
+    except Exception as e:
+        print(f"Error fetching {symbol}: {e}")
         return None
-    last = df.iloc[-1]
-    prev = df.iloc[-2]
 
-    if last["high"] > prev["high"] and last["close"] < prev["close"]:
-        return "sweep_high"
-    if last["low"] < prev["low"] and last["close"] > prev["close"]:
-        return "sweep_low"
-    return None
-
-def detect_bos(df):
-    """Check Break of Structure"""
-    if len(df) < 10:
+def analyze_strategy(df):
+    if df is None or df.empty:
         return None
-    recent_high = df["high"].iloc[-10:-1].max()
-    recent_low = df["low"].iloc[-10:-1].min()
-    close = df["close"].iloc[-1]
 
-    if close > recent_high:
-        return "bos_up"
-    if close < recent_low:
-        return "bos_down"
-    return None
+    last_close = df["close"].iloc[-1]
+    prev_close = df["close"].iloc[-2]
 
-def detect_order_block(df, sweep, bos):
-    """Detect valid Order Block (very simplified)"""
-    if sweep == "sweep_high" and bos == "bos_down":
-        return "bearish_order_block"
-    if sweep == "sweep_low" and bos == "bos_up":
-        return "bullish_order_block"
-    return None
+    # Simple example strategy (replace with your real one)
+    if last_close > prev_close:
+        return {
+            "signal": "BUY",
+            "entry": last_close,
+            "tp1": round(last_close * 1.01, 4),
+            "tp2": round(last_close * 1.02, 4),
+            "tp3": round(last_close * 1.03, 4),
+            "sl": round(last_close * 0.99, 4)
+        }
+    else:
+        return {
+            "signal": "SELL",
+            "entry": last_close,
+            "tp1": round(last_close * 0.99, 4),
+            "tp2": round(last_close * 0.98, 4),
+            "tp3": round(last_close * 0.97, 4),
+            "sl": round(last_close * 1.01, 4)
+        }
 
-def generate_signal(symbol):
-    """Run strategy and generate plain text signal"""
-    df = fetch_ohlcv(symbol)
+def main():
+    symbols = ["ETH/USDT", "BTC/USDT", "ENA/USDT"]  # use your chosen pairs
+    for symbol in symbols:
+        df = fetch_data(symbol)
+        signal = analyze_strategy(df)
+        if signal:
+            print(f"\n📊 {symbol} Signal:")
+            print(signal)
 
-    sweep = detect_liquidity_sweep(df)
-    bos = detect_bos(df)
-    ob = detect_order_block(df, sweep, bos)
-
-    if sweep and bos and ob:
-        direction = "LONG" if ob == "bullish_order_block" else "SHORT"
-        entry = df["close"].iloc[-1]
-        tp1 = entry * (1.005 if direction == "LONG" else 0.995)
-        tp2 = entry * (1.010 if direction == "LONG" else 0.990)
-        tp3 = entry * (1.020 if direction == "LONG" else 0.980)
-        sl = entry * (0.995 if direction == "LONG" else 1.005)
-
-        return f"""
-Signal for {symbol}
-Direction: {direction}
-Entry: {entry:.2f}
-TP1: {tp1:.2f}
-TP2: {tp2:.2f}
-TP3: {tp3:.2f}
-SL: {sl:.2f}
-Confluences: {sweep}, {bos}, {ob}
-"""
-    return None
-
-# ==============================
-#  Main Loop
-# ==============================
 if __name__ == "__main__":
-    print("🚀 Bot started (public mode, no API keys needed)")
-    while True:
-        for pair in pairs:
-            try:
-                signal = generate_signal(pair)
-                if signal:
-                    print(signal)
-            except Exception as e:
-                print(f"Error on {pair}: {e}")
-        time.sleep(60)  # run every 1 min
+    main()

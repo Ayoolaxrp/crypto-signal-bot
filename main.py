@@ -1,119 +1,102 @@
-import os
-import time
+# main.py
+
 import ccxt
 import pandas as pd
-from flask import Flask
+import time
+from datetime import datetime
 
-# ============ API KEYS (Fake for Testing) ============
-API_KEY = "mx0vglPbQhO0NZ5DYx"       # fake api key
-API_SECRET = "601fce1027f44fd2b49e056adf76359d"  # fake secret
+# =============================
+# Fake API Keys (replace later with real ones if needed)
+# =============================
+API_KEY = "FAKE_API_KEY_123456"
+API_SECRET = "FAKE_API_SECRET_ABCDEF"
 
-# ============ MEXC Client ============
+# =============================
+# Initialize MEXC exchange
+# =============================
 exchange = ccxt.mexc({
     "apiKey": API_KEY,
     "secret": API_SECRET,
     "enableRateLimit": True
 })
 
-# ============ Flask Server ============
-app = Flask(__name__)
+# =============================
+# Strategy: Liquidity Sweep → BOS → Order Block
+# =============================
+def fetch_ohlcv(symbol="BTC/USDT", timeframe="15m", limit=200):
+    """Fetch OHLCV data from MEXC"""
+    ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    df = pd.DataFrame(ohlcv, columns=['timestamp','open','high','low','close','volume'])  # type: ignore
+    df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+    return df
 
-@app.route("/")
-def home():
-    return "Bot is running smoothly ✅"
+def check_strategy(df):
+    """Simple example of your Liquidity Sweep → BOS → OB strategy"""
 
-# ============ Pairs to Scan ============
-pairs = [
-    "BTC/USDT",
-    "ETH/USDT",
-    "SOL/USDT",
-    "BNB/USDT",
-    "XRP/USDT"
-]  # ✅ replace/expand with the exact pairs you had in Replit
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
 
-# ============ Signal Generator ============
-def generate_signal(symbol, direction, price):
-    if direction == "long":
-        entry_low = round(price * 0.995, 4)
-        entry_high = round(price * 1.005, 4)
-        tp1 = round(price * 1.01, 4)
-        tp2 = round(price * 1.02, 4)
-        tp3 = round(price * 1.03, 4)
-        sl = round(price * 0.985, 4)
+    signals = []
 
-        print(f"""
-💥 Futures (Free Signal)
+    # ✅ Liquidity Sweep (price sweeps previous high/low but closes opposite)
+    if last['high'] > prev['high'] and last['close'] < prev['high']:
+        signals.append("Liquidity Sweep Down → Possible Short")
+    elif last['low'] < prev['low'] and last['close'] > prev['low']:
+        signals.append("Liquidity Sweep Up → Possible Long")
 
-✅ Long
+    # ✅ Break of Structure (close above/below recent swing)
+    if last['close'] > df['high'].iloc[-5:-1].max():
+        signals.append("Break of Structure Up → Bullish Bias")
+    elif last['close'] < df['low'].iloc[-5:-1].min():
+        signals.append("Break of Structure Down → Bearish Bias")
 
-#{symbol.replace("/", "")}
+    # ✅ Order Block (basic: last opposite candle before move)
+    # (This is simplified; in real version we’d mark OB zones)
+    if "Long" in " ".join(signals):
+        signals.append("Check Bullish Order Block for Entry")
+    elif "Short" in " ".join(signals):
+        signals.append("Check Bearish Order Block for Entry")
 
-Entry zone : {entry_low} - {entry_high}
-Take Profits :
-{tp1}
-{tp2}
-{tp3}
-Stop loss : {sl}
-        """)
+    return signals
 
-    elif direction == "short":
-        entry_low = round(price * 0.995, 4)
-        entry_high = round(price * 1.005, 4)
-        tp1 = round(price * 0.99, 4)
-        tp2 = round(price * 0.98, 4)
-        tp3 = round(price * 0.97, 4)
-        sl = round(price * 1.015, 4)
+def generate_alert(symbol, signals):
+    """Format alert message like your Telegram signals"""
+    if not signals:
+        return None
 
-        print(f"""
-💥 Futures (Free Signal)
+    alert = f"""
+📊 Signal for {symbol}
 
-❌ Short
+✅ Entry: Market Price
+🎯 TP1: +0.5%
+🎯 TP2: +1%
+🎯 TP3: +2%
+❌ SL: -0.5%
 
-#{symbol.replace("/", "")}
+🧾 Confluences:
+- {signals[0]}
+- {signals[1] if len(signals) > 1 else ''}
+    """.strip()
+    return alert
 
-Entry zone : {entry_low} - {entry_high}
-Take Profits :
-{tp1}
-{tp2}
-{tp3}
-Stop loss : {sl}
-        """)
-
-# ============ ICT Strategy (Alerts + Signals) ============
-def analyze_market(symbol="BTC/USDT", timeframe="1h", limit=100):
-    try:
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-        df = pd.DataFrame(
-            ohlcv,
-            columns=["timestamp", "open", "high", "low", "close", "volume"]
-        )  # type: ignore
-
-        last_close = df["close"].iloc[-1]
-        prev_high = df["high"].iloc[-2]
-        prev_low = df["low"].iloc[-2]
-        prev_close = df["close"].iloc[-2]
-
-        # Conditions
-        if last_close > prev_high and last_close > prev_close:
-            generate_signal(symbol, "long", last_close)
-        elif last_close < prev_low and last_close < prev_close:
-            generate_signal(symbol, "short", last_close)
-        else:
-            print(f"{symbol} | No clear setup | Last Close: {last_close}")
-
-    except Exception as e:
-        print(f"Error analyzing {symbol}: {str(e)}")
-
-# ============ Main Loop ============
 def run_bot():
+    pairs = ["BTC/USDT", "ETH/USDT", "ENA/USDT"]  # same as Replit setup
+    timeframe = "15m"
+
     while True:
-        for pair in pairs:
-            analyze_market(pair, "1h")
-            time.sleep(2)  # small delay to avoid rate limits
-        time.sleep(60)  # wait 1 min before next full cycle
+        for symbol in pairs:
+            try:
+                df = fetch_ohlcv(symbol, timeframe)
+                signals = check_strategy(df)
+                alert = generate_alert(symbol, signals)
+                if alert:
+                    print(f"[{datetime.now()}] {alert}\n")
+            except Exception as e:
+                print(f"Error fetching {symbol}: {e}")
+
+        time.sleep(60)  # wait before next check
+
 
 if __name__ == "__main__":
-    import threading
-    t = threading.Thread(target=run_bot)
-    t.start()
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    run_bot()
+

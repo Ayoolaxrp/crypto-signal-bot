@@ -1,3 +1,2 @@
-ccxt
-pandas
-flask
+ccxt==4.3.96
+pandas==2.2.2

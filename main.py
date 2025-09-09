@@ -3,14 +3,9 @@ import pandas as pd
 import time
 
 # ==============================
-#  Fake API Keys (for testing only)
+#  MEXC Public Client (no keys needed)
 # ==============================
-API_KEY = "601fce1027f44fd2b49e056adf76359d"
-API_SECRET = "mx0vglPbQhO0NZ5DYx"
-
 exchange = ccxt.mexc({
-    "apiKey": API_KEY,
-    "secret": API_SECRET,
     "enableRateLimit": True
 })
 
@@ -95,7 +90,7 @@ Confluences: {sweep}, {bos}, {ob}
 #  Main Loop
 # ==============================
 if __name__ == "__main__":
-    print("🚀 Bot started with fake keys:", API_KEY, API_SECRET)
+    print("🚀 Bot started (public mode, no API keys needed)")
     while True:
         for pair in pairs:
             try:

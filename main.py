@@ -32,7 +32,9 @@ def send_email(subject, body):
         msg["To"] = EMAIL_RECEIVER
 
         with smtplib.SMTP(EMAIL_HOST, EMAIL_PORT) as server:
-            server.starttls()
+            server.ehlo()                # handshake
+            server.starttls()            # secure connection
+            server.ehlo()                # handshake again
             server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
             server.sendmail(EMAIL_ADDRESS, EMAIL_RECEIVER, msg.as_string())
         print("✅ Email sent successfully!")
